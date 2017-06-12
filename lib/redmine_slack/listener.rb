@@ -1,6 +1,14 @@
 require 'httpclient'
 
 class SlackListener < Redmine::Hook::Listener
+  def model_daily_report_after_save(context={})
+    daily_report = context[:daily_report]
+    opts = Setting.plugin_redmine_slack
+    return unless opts[:post_daily_reports] == '1'
+
+    post_daily_report daily_report
+  end
+
 	def controller_issues_new_after_save(context={})
 		issue = context[:issue]
 
@@ -162,6 +170,21 @@ class SlackListener < Redmine::Hook::Listener
 	end
 
 private
+
+  def post_daily_report(dr)
+    url = Rails.application.routes.url_for(
+      controller: 'daily_reports', action: 'list',
+      host: Setting.host_name, project_id: dr.project.id
+    )
+    dr_text = dr.raw_text.gsub(/\n*\s+\(/, " #{dr.project.name} (")
+    msg = "*#{dr.author.name}* posted report:\r\n\r\n<#{url}|#{dr.report_date}>\r\n#{dr_text}" +
+          "\r\n---\r\n\r\n"
+    channel = channel_for_project(dr.project)
+    return unless channel
+
+    speak(msg, channel)
+  end
+
 	def escape(msg)
 		msg.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
 	end
@@ -198,7 +221,7 @@ private
 	def channel_for_project(proj)
 		return nil if proj.blank?
 
-		cf = ProjectCustomField.find_by_name("Slack Channel")
+    cf = ProjectCustomField.find_by_name("Slack Channel")
 
 		val = [
 			(proj.custom_value_for(cf).value rescue nil),
